@@ -7,7 +7,7 @@ from sqlalchemy.orm import declarative_base, relationship
 Base = declarative_base()
 
 def agora(): #Função para registro de operações
-    return datetime.now(timezone.utc)
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 #Definição das tabelas do banco de dados
 class Usuario(Base):
@@ -40,5 +40,12 @@ class Produto(Base):
     ativo = Column(Boolean, default=True) #Para possibilitar exibir produtos fora de estoque
     unidadeId = Column(Integer, ForeignKey("unidades.id"))  #Para identificação de produtos exclusivos de determinada unidade
 
-
-
+class LogAuditoria(Base):
+    __tablename__ = "logs_auditoria"
+    id = Column(Integer, primary_key=True)
+    usuarioId = Column(Integer)
+    acao = Column(String)
+    entidade = Column(String)
+    entidadeId = Column(Integer)
+    detalhes = Column(Text)
+    criadoEm = Column(DateTime, default=agora)
