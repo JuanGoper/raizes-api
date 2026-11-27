@@ -110,6 +110,32 @@ def consultar_estoque(unidadeId: int, usuario=Depends(usuario_logado), db: Sessi
     checar_perfil(usuario, "ADMIN", "GERENTE")
     return db.query(Produto).filter(Produto.unidadeId == unidadeId, Produto.ativo == True).order_by(Produto.id).all()
 
+#/pedidos
+pedidos = APIRouter(prefix="/pedidos", tags=["Pedidos"])
+
+@pedidos.post("", response_model=schemas.PedidoOut, status_code=201, summary="Cria pedido (canalPedido é obrigatório)")
+def criar_pedido(dados: schemas.PedidoIn, usuario=Depends(usuario_logado), db: Session = Depends(infra.get_db)):
+    return services.criar_pedido(db, usuario, dados)
+
+@pedidos.get("", response_model=schemas.PedidoPagina, summary="Lista pedidos (filtros: canalPedido, status, unidadeId)")
+def listar_pedidos(canalPedido: Optional[schemas.Canal] = None, status: Optional[schemas.Status] = None,
+                   unidadeId: Optional[int] = None, page: int = Depends(pagina), limit: int = Depends(tamanho),
+                   usuario=Depends(usuario_logado), db: Session = Depends(infra.get_db)):
+    return services.listar_pedidos(db, usuario, canalPedido, status, unidadeId, page, limit)
+
+@pedidos.get("/{pedido_id}", response_model=schemas.PedidoOut, summary="Consulta um pedido")
+def obter_pedido(pedido_id: int, usuario=Depends(usuario_logado), db: Session = Depends(infra.get_db)):
+    return services.buscar_pedido(db, usuario, pedido_id)
+
+@pedidos.patch("/{pedido_id}/status", response_model=schemas.PedidoOut, summary="Atualiza o status: em preparo, pronto, entregue (equipe)")
+def atualizar_status(pedido_id: int, dados: schemas.StatusIn, usuario=Depends(usuario_logado), db: Session = Depends(infra.get_db)):
+    checar_perfil(usuario, "COZINHA", "ATENDENTE", "GERENTE", "ADMIN")
+    return services.mudar_status(db, usuario, pedido_id, dados.status)
+
+@pedidos.post("/{pedido_id}/cancelar", response_model=schemas.PedidoOut, summary="Cancela o pedido, devolve o estoque e os pontos")
+def cancelar(pedido_id: int, usuario=Depends(usuario_logado), db: Session = Depends(infra.get_db)):
+    return services.cancelar_pedido(db, usuario, pedido_id)
+
 
 
 TODAS = [auth, usuarios, unidades, produtos, estoque, pedidos, pagamentos, fidelidade, auditoria]

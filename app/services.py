@@ -43,7 +43,20 @@ def fazer_login(db: Session, dados):
     db.commit()
     return infra.criar_token(usuario.id)
 
+def definir_consentimento(db: Session, usuario, aceito):
+    usuario.consentimentoFidelidade = aceito
+    usuario.dataConsentimento = agora()
+    registrar_log(db, usuario.id, "CONSENTIMENTO_FIDELIDADE", "usuario", usuario.id, "aceito=" + str(aceito))
+    db.commit()
 
+def anonimizar(db: Session, usuario):
+    usuario.nome = "Usuário anonimizado"
+    usuario.email = "anonimo-" + str(usuario.id) + "@anonimizado.invalid"
+    usuario.senhaHash = infra.gerar_hash(secrets.token_urlsafe(16))
+    usuario.ativo = False
+    usuario.consentimentoFidelidade = False
+    registrar_log(db, usuario.id, "USUARIO_ANONIMIZADO", "usuario", usuario.id)
+    db.commit()
 
 #Funções para unidades, produtos e estoques
 def criar_unidade(db: Session, usuario, dados):
@@ -101,4 +114,77 @@ def cardapio_da_unidade(db: Session, unidade_id):
         raise erro(404, "Unidade não encontrada.")
     return (db.query(Produto).filter(Produto.unidadeId == unidade_id, Produto.ativo == True, Produto.estoque > 0)
             .order_by(Produto.nome).all())
+
+#Funções de pedidos
+def criar_pedido(db: Session, usuario, dados):
+    unidade = db.get(Unidade, dados.unidadeId) #Registro de unidade
+    if unidade is None:
+        raise erro(404, "Unidade não encontrada.")
+    clienteId = dados.clienteId
+    if usuario.perfil == "CLIENTE": #Permitido não informar o id em caso de pedidos direto no balcão de unidade
+        if clienteId not in (None, usuario.id):
+            raise erro(403, "Você só pode criar pedidos em seu próprio nome.")
+        clienteId = usuario.id
+    elif clienteId is not None and db.get(Usuario, clienteId) is None:
+        raise erro(404, "Cliente não encontrado.")
+    pedido = Pedido(canalPedido=dados.canalPedido, clienteId=clienteId, unidadeId=unidade.id,
+                    status="AGUARDANDO_PAGAMENTO", valorTotal=0)
+    total = 0
+    for item in dados.itens:
+        produto = db.get(Produto, item.produtoId)
+        if produto is None or not produto.ativo or produto.unidadeId != unidade.id:
+            raise erro(404, "Produto " + str(item.produtoId) + " não encontrado nesta unidade.")
+        if produto.estoque < item.quantidade:
+            raise erro(409, "Estoque insuficiente para o produto " + str(produto.id) + " (disponível: " + str(produto.estoque) + ").")
+        produto.estoque -= item.quantidade
+        total += produto.preco * item.quantidade
+        pedido.itens.append(ItemPedido(produtoId=produto.id, quantidade=item.quantidade, precoUnitario=produto.preco))
+    pedido.valorTotal = round(total, 2)
+    db.add(pedido)
+    db.flush()
+    registrar_log(db, usuario.id, "PEDIDO_CRIADO", "pedido", pedido.id, "canal=" + pedido.canalPedido)
+    db.commit()
+    return pedido
+
+def buscar_pedido(db: Session, usuario, pedido_id):
+    pedido = db.get(Pedido, pedido_id)
+    if pedido is None or (usuario.perfil == "CLIENTE" and pedido.clienteId != usuario.id):
+        raise erro(404, "Pedido não encontrado.")
+    return pedido
+
+def listar_pedidos(db: Session, usuario, canalPedido, status, unidadeId, page, limit):
+    consulta = db.query(Pedido)
+    if usuario.perfil == "CLIENTE":
+        consulta = consulta.filter(Pedido.clienteId == usuario.id)
+    if canalPedido:
+        consulta = consulta.filter(Pedido.canalPedido == canalPedido)
+    if status:
+        consulta = consulta.filter(Pedido.status == status)
+    if unidadeId:
+        consulta = consulta.filter(Pedido.unidadeId == unidadeId)
+    return paginar(consulta.order_by(Pedido.id.desc()), page, limit)
+
+def mudar_status(db: Session, usuario, pedido_id, novo):
+    pedido = buscar_pedido(db, usuario, pedido_id)
+    if novo not in TRANSICOES.get(pedido.status, []):
+        raise erro(409, "Não é permitido mudar o pedido de " + pedido.status + " para " + novo + ".")
+    anterior = pedido.status
+    pedido.status = novo
+    registrar_log(db, usuario.id, "PEDIDO_STATUS_ALTERADO", "pedido", pedido.id, anterior + " -> " + novo)
+    db.commit()
+    return pedido
+
+def cancelar_pedido(db: Session, usuario, pedido_id):
+    pedido = buscar_pedido(db, usuario, pedido_id)
+    if pedido.status not in PODE_CANCELAR:
+        raise erro(409, "Pedido em " + pedido.status + " não pode mais ser cancelado.")
+    for item in pedido.itens:
+        db.get(Produto, item.produtoId).estoque += item.quantidade #Retorna ao estoque
+    if pedido.pontosGerados:
+        db.get(Usuario, pedido.clienteId).pontos -= pedido.pontosGerados
+        pedido.pontosGerados = 0
+    pedido.status = "CANCELADO"
+    registrar_log(db, usuario.id, "PEDIDO_CANCELADO", "pedido", pedido.id)
+    db.commit()
+    return pedido
 

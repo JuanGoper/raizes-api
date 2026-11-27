@@ -6,6 +6,11 @@ from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
 
+#Regras de status de pedidos
+TRANSICOES = {"PAGO": ["EM_PREPARO"], "EM_PREPARO": ["PRONTO"], "PRONTO": ["ENTREGUE"]}
+PODE_CANCELAR = ["AGUARDANDO_PAGAMENTO", "PAGAMENTO_RECUSADO", "PAGO", "EM_PREPARO"]
+
+
 def agora(): #Função para registro de operações
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -40,12 +45,24 @@ class Produto(Base):
     ativo = Column(Boolean, default=True) #Para possibilitar exibir produtos fora de estoque
     unidadeId = Column(Integer, ForeignKey("unidades.id"))  #Para identificação de produtos exclusivos de determinada unidade
 
-class LogAuditoria(Base):
-    __tablename__ = "logs_auditoria"
+class Pedido(Base):
+    __tablename__ = "pedidos"
     id = Column(Integer, primary_key=True)
-    usuarioId = Column(Integer)
-    acao = Column(String)
-    entidade = Column(String)
-    entidadeId = Column(Integer)
-    detalhes = Column(Text)
+    canalPedido = Column(String)
+    clienteId = Column(Integer, ForeignKey("usuarios.id"))
+    unidadeId = Column(Integer, ForeignKey("unidades.id"))
+    status = Column(String)
+    valorTotal = Column(Float)
+    pontosGerados = Column(Integer, default=0)
     criadoEm = Column(DateTime, default=agora)
+    itens = relationship("ItemPedido", lazy="selectin")  #Para incluir os itens do pedido
+
+class ItemPedido(Base):
+    __tablename__ = "itens_pedido"
+    id = Column(Integer, primary_key=True)
+    pedidoId = Column(Integer, ForeignKey("pedidos.id"))
+    produtoId = Column(Integer, ForeignKey("produtos.id"))
+    quantidade = Column(Integer)
+    precoUnitario = Column(Float)
+
+

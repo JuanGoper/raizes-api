@@ -4,7 +4,9 @@ from datetime import datetime
 from typing import List, Literal, Optional
 from pydantic import BaseModel, Field
 
-
+#Valores que serão aceitos e depois exibidos no swagger
+Canal = Literal["APP", "TOTEM", "BALCAO", "PICKUP", "WEB"]
+Status = Literal["AGUARDANDO_PAGAMENTO", "PAGAMENTO_RECUSADO", "PAGO", "EM_PREPARO", "PRONTO", "ENTREGUE", "CANCELADO"]
 EMAIL = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"  #validação de formato de emails
 
 class Saida(BaseModel): #Saída a partir dos dados do banco de dados
@@ -75,4 +77,40 @@ class EstoqueOut(Saida):
     id: int
     nome: str
     estoque: int
+
+#Classes de dados de pedidos e pagamentos
+class ItemIn(BaseModel):
+    produtoId: int
+    quantidade: int = Field(gt=0)
+
+class PedidoIn(BaseModel):
+    canalPedido: Canal
+    unidadeId: int
+    clienteId: Optional[int] = None
+    itens: List[ItemIn] = Field(min_length=1)
+    formaPagamento: Literal["MOCK"] = "MOCK"
+
+class ItemOut(Saida):
+    produtoId: int
+    quantidade: int
+    precoUnitario: float
+
+class PedidoOut(Saida):
+    id: int
+    canalPedido: str
+    unidadeId: int
+    clienteId: Optional[int]
+    status: str
+    valorTotal: float
+    itens: List[ItemOut]
+    criadoEm: datetime
+
+class PedidoPagina(BaseModel):
+    items: List[PedidoOut]
+    page: int
+    limit: int
+    total: int
+
+class StatusIn(BaseModel):
+    status: Status
 
